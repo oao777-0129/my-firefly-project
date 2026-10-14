@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>夜捕螢火蟲</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#0d2b2e;
+    touch-action:none; -webkit-user-select:none; user-select:none;
+    font-family: sans-serif; }
+  canvas { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W, H, dpr;
+function resize(){
+  dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize', resize); resize();
+
+// ---- 狀態 ----
+let state = 'menu';            // menu | play | over
+let jarX, items, score, lives, spawnT, time, best = 0, stars = [];
+try { best = parseInt(localStorage.getItem('ff_best')||'0',10) || 0; } catch(e){}
+
+for (let i=0;i<60;i++) stars.push({x:Math.random(), y:Math.random()*0.8, r:Math.random()*1.4+0.3, p:Math.random()*6});
+
+function start(){
+  state='play'; score=0; lives=3; items=[]; spawnT=0; time=0; jarX=W/2;
+}
+
+// ---- 輸入（滑鼠與觸控都吃 pointer 事件）----
+function pointer(e){
+  const x = e.clientX;
+  if (state==='play') jarX = Math.max(40, Math.min(W-40, x));
+}
+cv.addEventListener('pointerdown', e=>{
+  if (state!=='play') { start(); }
+  pointer(e);
+});
+cv.addEventListener('pointermove', pointer);
+
+// ---- 遊戲邏輯 ----
+function spawn(){
+  const storm = Math.random() < 0.25 + Math.min(0.15, score*0.003);
+  items.push({
+    x: 30 + Math.random()*(W-60),
+    y: -20,
+    vy: (storm?170:120) + Math.min(220, score*4) + Math.random()*60,
+    sway: Math.random()*6, storm
+  });
+}
+
+function update(dt){
+  time += dt;
+  spawnT -= dt;
+  if (spawnT <= 0){ spawn(); spawnT = Math.max(0.32, 0.9 - score*0.012); }
+
+  const jarY = H - 90;
+  for (const it of items){
+    it.y += it.vy*dt;
+    it.dx = it.storm ? 0 : Math.sin(time*2 + it.sway)*0.6;
+    it.x += it.dx;
+    // 接住
+    if (!it.dead && it.y > jarY-20 && it.y < jarY+30 && Math.abs(it.x-jarX) < 44){
+      it.dead = true;
+      if (it.storm){ lives--; flash = 0.25; }
+      else { score++; }
+    }
+  }
+  items = items.filter(it => !it.dead && it.y < H+30);
+
+  if (lives <= 0){
+    state='over';
+    if (score > best){ best = score; try{ localStorage.setItem('ff_best', best); }catch(e){} }
+  }
+}
+
+// ---- 繪圖 ----
+let flash = 0;
+function drawBG(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#071a1d'); g.addColorStop(1,'#12403f');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  for (const s of stars){
+    ctx.globalAlpha = 0.4 + 0.4*Math.sin(performance.now()/800 + s.p);
+    ctx.fillStyle = '#cfe9e0';
+    ctx.beginPath(); ctx.arc(s.x*W, s.y*H, s.r, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // 地面草叢
+  ctx.fillStyle = '#06191b';
+  ctx.beginPath(); ctx.moveTo(0,H);
+  for (let x=0;x<=W;x+=18) ctx.lineTo(x, H-28 - Math.abs(Math.sin(x*0.13))*22);
+  ctx.lineTo(W,H); ctx.fill();
+}
+
+function drawFirefly(it){
+  const t = performance.now()/200 + it.sway;
+  if (it.storm){
+    // 雨滴雲：深灰水滴
+    ctx.fillStyle = '#5b6f86';
+    ctx.beginPath(); ctx.moveTo(it.x, it.y-16);
+    ctx.quadraticCurveTo(it.x+13, it.y+4, it.x, it.y+14);
+    ctx.quadraticCurveTo(it.x-13, it.y+4, it.x, it.y-16); ctx.fill();
+    ctx.strokeStyle = '#a9bad0'; ctx.lineWidth = 2; ctx.stroke();
+  } else {
+    const r = 18 + Math.sin(t)*3;
+    const g = ctx.createRadialGradient(it.x,it.y,0,it.x,it.y,r*2.2);
+    g.addColorStop(0,'rgba(255,236,120,0.95)');
+    g.addColorStop(0.35,'rgba(214,255,90,0.45)');
+    g.addColorStop(1,'rgba(214,255,90,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(it.x,it.y,r*2.2,0,7); ctx.fill();
+    ctx.fillStyle = '#fff8c2';
+    ctx.beginPath(); ctx.arc(it.x,it.y,4,0,7); ctx.fill();
+  }
+}
+
+function drawJar(){
+  const x = jarX, y = H-90;
+  ctx.strokeStyle = '#cfe9e0'; ctx.lineWidth = 3;
+  ctx.fillStyle = 'rgba(207,233,224,0.12)';
+  ctx.beginPath();
+  ctx.moveTo(x-34,y-20); ctx.lineTo(x-38,y+34);
+  ctx.quadraticCurveTo(x,y+46,x+38,y+34); ctx.lineTo(x+34,y-20);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#cfe9e0'; ctx.fillRect(x-38,y-30,76,10);
+}
+
+function drawHUD(){
+  ctx.fillStyle = '#e9f5ef';
+  ctx.font = 'bold 34px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(score, 20, 52);
+  ctx.textAlign = 'right';
+  for (let i=0;i<3;i++){
+    ctx.fillStyle = i<lives ? '#ffe678' : 'rgba(255,230,120,0.18)';
+    ctx.beginPath(); ctx.arc(W-24-i*30, 40, 9, 0, 7); ctx.fill();
+  }
+}
+
+function center(text, y, size, color){
+  ctx.textAlign='center'; ctx.fillStyle=color||'#e9f5ef';
+  ctx.font = `bold ${size}px sans-serif`; ctx.fillText(text, W/2, y);
+}
+
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now-last)/1000); last = now;
+  if (state==='play') update(dt);
+
+  drawBG();
+  if (state!=='menu'){ items.forEach(drawFirefly); drawJar(); drawHUD(); }
+  if (flash>0){ ctx.fillStyle=`rgba(120,150,200,${flash*1.6})`; ctx.fillRect(0,0,W,H); flash-=dt; }
+
+  if (state==='menu'){
+    center('夜捕螢火蟲', H*0.34, 44);
+    center('左右滑動玻璃罐，接住發光的螢火蟲', H*0.34+46, 17, '#a8c9bf');
+    center('別接到藍色雨滴，漏掉三次就結束', H*0.34+72, 17, '#a8c9bf');
+    center('點一下開始', H*0.62, 28, '#ffe678');
+    if (best) center('最高分 '+best, H*0.62+44, 18, '#a8c9bf');
+  } else if (state==='over'){
+    ctx.fillStyle='rgba(5,20,22,0.6)'; ctx.fillRect(0,0,W,H);
+    center('得分 '+score, H*0.38, 46);
+    center('最高分 '+best, H*0.38+44, 20, '#a8c9bf');
+    center('點一下再玩一次', H*0.60, 28, '#ffe678');
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
